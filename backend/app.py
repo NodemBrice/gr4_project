@@ -1,5 +1,5 @@
-from flask import Flask, render_template
 from typing import Any
+from flask import Flask, render_template
 from backend.notes import get_all_notes
 
 app: Flask = Flask(__name__)
