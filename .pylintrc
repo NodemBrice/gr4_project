@@ -1,0 +1,16 @@
+[MASTER]
+# Ignorer les docstrings pour se concentrer sur le code et le typage
+disable=C0114,C0115,C0116  
+
+[FORMAT]
+# Limite le nombre de lignes par fichier (module)
+max-module-lines=100  
+
+# Longueur max d'une ligne pour garder un code lisible
+max-line-length=120  
+
+
+[IMPORTS]
+# Détection des imports inutilisés activée par défaut
+# Pylint signalera un warning si un import n'est jamais utilisé
+
