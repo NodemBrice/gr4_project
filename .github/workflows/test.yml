@@ -1,0 +1,16 @@
+name: Premier Test
+
+on: [push]   # se déclenche à chaque push
+
+jobs:
+  bonjour:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Dis bonjour
+        run: echo "🚀 GitHub Actions fonctionne !"
+
+      - name: Liste les fichiers
+        run: ls -la

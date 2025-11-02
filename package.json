@@ -1,0 +1,21 @@
+{
+  "name": "gr4_project",
+  "version": "1.0.0",
+  "description": "Gestion de Notes",
+  "main": "eslint.config.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NodemBrice/gr4_project.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/NodemBrice/gr4_project/issues"
+  },
+  "homepage": "https://github.com/NodemBrice/gr4_project#readme"
+}
