@@ -1,0 +1,21 @@
+# --- Python ---
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# --- Node / npm ---
+node_modules/
+npm-debug.log
+package-lock.json
+
+# --- Environnements / systèmes ---
+.env
+.DS_Store
+
+# --- VSCode / IDE ---
+.vscode/
+.idea/
+
+# --- Autres fichiers temporaires ---
+*.log
