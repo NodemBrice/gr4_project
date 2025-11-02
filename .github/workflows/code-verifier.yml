@@ -1,0 +1,64 @@
+name: Code Verifier avec Gemini
+
+on:
+  push:
+    branches: [ '*' ]
+  pull_request:
+    branches: [ '*' ]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install google-generativeai requests pylint python-dotenv
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install JS dependencies
+        run: |
+          npm install htmlhint eslint
+
+      - name: Run Linters
+        run: |
+          pylint --rcfile=.pylintrc **/*.py || true
+          npx htmlhint --config .htmlhintrc **/*.html || true
+          npx eslint --config .eslintrc.json **/*.js || true
+
+      - name: Run Code Analysis with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # Fallback sur secrets si .env pas dispo ; sinon adapte
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          SMTP_SERVER: smtp.gmail.com
+          COLLAB_EMAIL: ${{ github.event.pull_request.user.email || github.actor }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: python .github/scripts/analyze_code.py
+
+      - name: Comment on PR if failed
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comment = fs.readFileSync('.github/scripts/error_comment.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

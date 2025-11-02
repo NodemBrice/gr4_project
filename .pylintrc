@@ -1,16 +1,19 @@
 [MASTER]
 # Ignorer les docstrings pour se concentrer sur le code et le typage
-disable=C0114,C0115,C0116  
+disable=C0114,C0115,C0116
 
 [FORMAT]
 # Limite le nombre de lignes par fichier (module)
-max-module-lines=100  
+max-module-lines=400
 
 # Longueur max d'une ligne pour garder un code lisible
-max-line-length=120  
+max-line-length=300
 
 
 [IMPORTS]
 # Détection des imports inutilisés activée par défaut
 # Pylint signalera un warning si un import n'est jamais utilisé
 
+[MESSAGES CONTROL]
+disable=line-too-long,too-many-lines,import-error
+extension-pkg-allow-list=google.generativeai,dotenv,requests

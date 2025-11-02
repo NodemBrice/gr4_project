@@ -1,0 +1,57 @@
+name: 🤖 AI Code Analyzer
+
+on:
+  push:
+    branches: ['**']  # Toutes les branches
+  pull_request:
+    branches: ['**']  # Toutes les branches
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: 📦 Install dependencies
+        run: |
+          pip install google-generativeai python-dotenv requests pylint
+          npm install -g eslint htmlhint
+      
+      - name: 🔧 Create .env
+        run: |
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          echo "EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}" >> .env
+          echo "EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}" >> .env
+          echo "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> .env
+          echo "GITHUB_REPOSITORY=${{ github.repository }}" >> .env
+          echo "GITHUB_ACTOR=${{ github.actor }}" >> .env
+      
+      - name: 🤖 Run AI Analyzer
+        run: python .github/scripts/analyze_code.py
+        continue-on-error: true
+      
+      - name: 💬 Post comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const commentPath = '.github/scripts/ai_analysis_comment.md';
+            if (fs.existsSync(commentPath)) {
+              const comment = fs.readFileSync(commentPath, 'utf8');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }

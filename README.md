@@ -39,12 +39,12 @@ gestion-notes/
 
 ## ⚡ Technologies et outils utilisés
 
-- **Python 3.13** (backend typé avec `mypy`)  
-- **Flask** pour l’API backend  
-- **HTML/CSS/JS** pour le frontend  
-- **ESLint** pour valider le JavaScript  
-- **HTMLHint** pour valider le HTML  
-- **Pylint** pour la qualité du code Python  
+- **Python 3.13** (backend typé avec `mypy`)
+- **Flask** pour l’API backend
+- **HTML/CSS/JS** pour le frontend
+- **ESLint** pour valider le JavaScript
+- **HTMLHint** pour valider le HTML
+- **Pylint** pour la qualité du code Python
 - **GitHub Actions** pour automatiser la validation de code à chaque push ou pull request
 
 ---
