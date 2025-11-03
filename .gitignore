@@ -19,3 +19,7 @@ package-lock.json
 
 # --- Autres fichiers temporaires ---
 *.log
+# .gitignore
+.env
+.env.local
+*.env
