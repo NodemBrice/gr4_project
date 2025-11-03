@@ -1,15 +1,43 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <title>Gestion de note</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <title>Gestion des Notes</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>📘 Gestion des notes</h1>
-  <table id="table-notes">
-    <tr><th>Nom</th><th>Matière</th><th>Note</th></tr>
-  </table>
-  <script src="script.js"></script>
+    <h1>Tableau des Notes</h1>
+    
+    <table id="notes-table">
+        <thead>
+            <tr>
+                <th>Nom</th>
+                <th>Matière</th>
+                <th>Note</th>
+            </tr>
+        </thead>
+        <tbody>
+            </tbody>
+    </table>
+
+    <hr>
+    
+    <h2>Ajouter une Nouvelle Note</h2>
+    <form id="add-note-form">
+        <label for="nom">Nom:</label>
+        <input type="text" id="nom" required><br><br>
+        
+        <label for="matiere">Matière:</label>
+        <input type="text" id="matiere" required><br><br>
+        
+        <label for="note">Note:</label>
+        <input type="number" id="note" step="0.1" min="0" max="20" required><br><br>
+        
+        <button type="submit">Ajouter</button>
+    </form>
+    
+    <p id="message"></p>
+    
+    <script src="script.js"></script>
 </body>
 </html>
