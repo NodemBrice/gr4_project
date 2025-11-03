@@ -1,57 +1,77 @@
-name: 🤖 AI Code Analyzer
+name: 🚨 AI Strict Code Analyzer
 
 on:
   push:
-    branches: ['**']  # Toutes les branches
+    branches: ['**']
   pull_request:
-    branches: ['**']  # Toutes les branches
+    branches: ['**']
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: 📥 Checkout code
+      - name: 📥 Checkout
         uses: actions/checkout@v3
         with:
-          fetch-depth: 2
-      
+          fetch-depth: 0
+
       - name: 🐍 Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-      
-      - name: 📦 Install dependencies
+          python-version: '3.11'
+
+      - name: 📦 Install Python tools
         run: |
-          pip install google-generativeai python-dotenv requests pylint
+          pip install --upgrade pip
+          pip install google-generativeai python-dotenv requests
+          pip install pylint mypy
+
+      - name: 📦 Install Node tools
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: 📦 Install linters
+        run: |
           npm install -g eslint htmlhint
-      
+
       - name: 🔧 Create .env
         run: |
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
-          echo "EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}" >> .env
-          echo "EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}" >> .env
-          echo "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> .env
-          echo "GITHUB_REPOSITORY=${{ github.repository }}" >> .env
-          echo "GITHUB_ACTOR=${{ github.actor }}" >> .env
-      
-      - name: 🤖 Run AI Analyzer
-        run: python .github/scripts/analyze_code.py
-        continue-on-error: true
-      
-      - name: 💬 Post comment on PR
-        if: github.event_name == 'pull_request'
+          cat > .env << EOF
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}
+          GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY=${{ github.repository }}
+          GITHUB_ACTOR=${{ github.actor }}
+          EOF
+
+      - name: 🤖 Run STRICT Analyzer
+        id: analyze
+        run: |
+          python .github/scripts/analyze_code.py
+        continue-on-error: false
+
+      - name: 💬 Post PR Comment
+        if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v6
         with:
           script: |
             const fs = require('fs');
-            const commentPath = '.github/scripts/ai_analysis_comment.md';
-            if (fs.existsSync(commentPath)) {
-              const comment = fs.readFileSync(commentPath, 'utf8');
-              github.rest.issues.createComment({
+            const reportPath = '.github/scripts/ai_analysis_report.md';
+            if (fs.existsSync(reportPath)) {
+              const report = fs.readFileSync(reportPath, 'utf8');
+              await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: comment
+                body: report
               });
             }
+
+      - name: ❌ Fail if errors
+        if: failure()
+        run: |
+          echo "❌ COMMIT REJETÉ - Erreurs détectées !"
+          exit 1

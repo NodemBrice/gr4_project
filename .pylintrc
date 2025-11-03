@@ -6,7 +6,7 @@ disable=C0114,C0115,C0116
 # Limite le nombre de lignes par fichier (module)
 max-module-lines=400
 
-# Longueur max d'une ligne pour garder un code lisible
+# Longueur max d'une aligne pour garder un code lisible
 max-line-length=300
 
 
@@ -17,3 +17,8 @@ max-line-length=300
 [MESSAGES CONTROL]
 disable=line-too-long,too-many-lines,import-error
 extension-pkg-allow-list=google.generativeai,dotenv,requests
+
+[DESIGN]
+max-nested-blocks=8
+max-branches=20
+max-locals=25

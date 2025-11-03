@@ -160,3 +160,8 @@ Ce README doit être votre guide de référence pour travailler sur le projet.
 
 yaml
 Copier le code
+
+--- commandes installation des dependance du fichier setup_hooks.sh
+ chmod +x setup_hooks.sh
+ ./setup_hooks.sh
+ il yaura execution du fichier et installation des deendances necessaires au projet

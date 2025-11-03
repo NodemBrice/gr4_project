@@ -1,217 +1,299 @@
+"""Analyseur de code IA avec verification stricte des standards."""
 import argparse
 import json
 import os
-import random
+import smtplib
 import subprocess
 import sys
-import smtplib
-
-import requests
-import google.generativeai as genai
-from dotenv import load_dotenv
-from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Any, Dict, List, Tuple
+
+import google.generativeai as genai # pyright: ignore[reportMissingImports]
+from dotenv import load_dotenv # pyright: ignore[reportMissingImports]
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+# Configuration
+genai.configure(api_key=os.getenv('GEMINI_API_KEY'))  # type: ignore[attr-defined]
+model = genai.GenerativeModel('gemini-2.5-flash')  # type: ignore[attr-defined]
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
-SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-COLLAB_EMAIL = os.getenv('COLLAB_EMAIL', 'default@example.com')
-COLLAB_NAME = os.getenv('GITHUB_ACTOR', 'Collaborateur')
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
-GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY', 'NodemBrice/gr4_project')
-
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 
-def get_changed_files(files_from_args=None):
-    if files_from_args:
-        return [f for f in files_from_args if f.endswith(('.py', '.html', '.htm', '.js', '.jsx'))]
-    diff = subprocess.run(
+def get_files() -> List[str]:
+
+    result = subprocess.run(
         ['git', 'diff', '--cached', '--name-only', '--diff-filter=AM'],
-        capture_output=True,
-        text=True,
-        check=True
+        capture_output=True, text=True, check=False
     )
-    return [f for f in diff.stdout.strip().split('\n') if f.endswith(('.py', '.html', '.htm', '.js', '.jsx'))]
+    return [f for f in result.stdout.split('\n')
+            if f.strip() and f.endswith(('.py', '.html', '.js', '.jsx'))]
 
 
-def load_standards():
-    return "Règles via Pylint (Python), HTMLHint (HTML) et ESLint (JS). Vérification IA complémentaire sur syntaxe, types et erreurs."
+def run_linter(file: str) -> Tuple[bool, List[str]]:
+    """Execute le linter approprie selon le fichier."""
+    ext = file.split('.')[-1]
+    errors: List[str] = []
+
+    try:
+        if ext == 'py':
+            # Pylint
+            r = subprocess.run(['pylint', file, '--rcfile=.pylintrc',
+                              '--output-format=json'],
+                              capture_output=True, text=True, check=False)
+            if r.returncode != 0 and r.stdout.strip():
+                try:
+                    pylint_data = json.loads(r.stdout)
+                    for e in pylint_data:
+                        errors.append(
+                            f"Ligne {e['line']}: {e['message']} [{e['symbol']}]"
+                        )
+                except json.JSONDecodeError:
+                    pass
+
+            # MyPy
+            r = subprocess.run(['mypy', file, '--strict'],
+                             capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                errors.extend([f"MyPy: {line}" for line in r.stdout.split('\n')
+                             if line.strip() and ':' in line])
+
+        elif ext in ['js', 'jsx']:
+            r = subprocess.run(['npx', 'eslint', file,
+                              '--config=.eslintrc.json', '--format=json'],
+                              capture_output=True, text=True, check=False)
+            if r.returncode != 0 and r.stdout.strip():
+                try:
+                    eslint_data = json.loads(r.stdout)
+                    for f_result in eslint_data:
+                        for e in f_result.get('messages', []):
+                            errors.append(
+                                f"Ligne {e['line']}: {e['message']} "
+                                f"({e.get('ruleId', '')})"
+                            )
+                except json.JSONDecodeError:
+                    pass
+
+        elif ext in ['html', 'htm']:
+            r = subprocess.run(['npx', 'htmlhint', file,
+                              '--config=.htmlhintrc'],
+                              capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                errors.extend([line for line in r.stdout.split('\n')
+                             if 'line' in line.lower()])
+
+    except FileNotFoundError as e:
+        errors.append(f"Linter non installe: {e}")
+
+    return len(errors) == 0, errors
 
 
-def analyze_with_gemini(code, standards, file_path):
-    lang = file_path.split('.')[-1]
-    prompt = (
-        "Analyse ce code " + lang.upper() + " (" + file_path + ") :\n"
-        "- Vérifie la syntaxe et erreurs potentielles.\n"
-        "- Vérifie les types de variables (strict : int, float, str, list, etc. ; pas de 'any').\n"
-        "- Vérifie la conformité aux normes : " + standards + "\n"
-        "- Si erreurs : Liste-les par ligne, explique, et propose un code corrigé complet.\n\n"
-        "Code :\n```\n" + code + "\n```\n\n"
-        'Réponds **uniquement** en JSON (sans ```json) :\n'
-        '{\n'
-        '  "errors": [\n'
-        '    { "line": int, "description": str, "correction": str }\n'
-        '  ],\n'
-        '  "is_valid": bool,\n'
-        '  "corrected_code": str\n'
-        '}'
-    ).strip()
+def analyze_with_ai(file: str, code: str,
+                   linter_errors: List[str]) -> Dict[str, Any]:
+    """Analyse le code avec Gemini et genere un message personnalise."""
+    lang = file.split('.')[-1].upper()
+
+    linter_ctx = "\n".join(f"- {e}" for e in linter_errors) \
+                 if linter_errors else "Aucune"
+
+    prompt = f"""Tu es un expert {lang}. Analyse ce code du fichier {file}.
+
+ERREURS LINTERS:
+{linter_ctx}
+
+CODE:
+```{lang.lower()}
+{code}
+```
+
+Retourne un JSON (sans markdown):
+{{
+  "is_valid": true/false,
+  "errors": [{{"line": int, "description": str, "fix": str}}],
+  "corrected_code": "code corrige si is_valid=false",
+  "email_message": {{
+    "subject": "sujet email court et precis",
+    "greeting": "salutation personnalisee unique",
+    "intro": "phrase d'introduction unique",
+    "conclusion": "phrase de conclusion unique et encourageante"
+  }}
+}}
+
+IMPORTANT: Genere un message EMAIL unique et different a chaque fois et
+Reponds **uniquement** avec un objet JSON valide, sans aucun texte avant ou après.
+"""
 
     try:
         response = model.generate_content(prompt)
-        cleaned = response.text.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        data = json.loads(cleaned.strip())
+        text = response.text.strip()
+
+        # Nettoyage
+        for marker in ['```json', '```']:
+            text = text.replace(marker, '')
+
+        data: Dict[str, Any] = json.loads(text.strip())
+
+        # Force invalide si erreurs linters
+        if linter_errors:
+            data['is_valid'] = False
+
         return data
-    except json.JSONDecodeError as e:
-        print(f"Erreur parsing JSON : {e}")
+
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return {
-            "errors": [{"line": 0, "description": "Erreur analyse", "correction": ""}],
             "is_valid": False,
-            "corrected_code": ""
+            "errors": [{"line": 0, "description": f"Erreur IA: {e}",
+                       "fix": "Reessaye"}],
+            "corrected_code": code,
+            "email_message": {
+                "subject": "Erreur analyse",
+                "greeting": "Bonjour,",
+                "intro": "L'analyse a echoue.",
+                "conclusion": "Reessaye plus tard."
+            }
         }
-    except Exception as e:
-        print(f"Erreur Gemini : {e}")
-        return {
-            "errors": [{"line": 0, "description": "Erreur IA", "correction": ""}],
-            "is_valid": False,
-            "corrected_code": ""
-        }
 
 
-def get_collaborators_emails():
-    if not GITHUB_TOKEN:
-        print("Pas de GITHUB_TOKEN → fallback sur ton email.")
-        return [(COLLAB_NAME, COLLAB_EMAIL)]
-
-    headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github+json'}
-    url = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/collaborators"
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"Erreur API : {e} → fallback sur ton email.")
-        return [(COLLAB_NAME, COLLAB_EMAIL)]
-
-    collab_list = []
-    for user in resp.json():
-        user_resp = requests.get(user['url'], headers=headers, timeout=10)
-        if user_resp.status_code == 200:
-            data = user_resp.json()
-            name = data.get('name') or user['login']
-            email = data.get('email') or f"{user['login']}@users.noreply.github.com"
-            collab_list.append((name, email))
-    return collab_list or [(COLLAB_NAME, COLLAB_EMAIL)]
-
-
-def send_email(errors, corrected_code, file_paths, name, email):
-    salutations = [f"Cher {name},", f"Bonjour {name},", f"Salut {name},"]
-    intros = ["Merci pour votre contribution !", "Nous apprécions votre effort.", "Votre code est presque prêt."]
-    explications = ["Quelques ajustements sont nécessaires.", "Des corrections mineures sont à faire.", "Petits points à rectifier."]
-    fermetures = ["Cordialement,", "À bientôt,", "Bonne continuation,"]
-
-    subject = f"Corrections pour gr4_project - {', '.join(file_paths[:2])}"
-    body = f"""
-{random.choice(salutations)}
-
-{random.choice(intros)}
-
-{random.choice(explications)} Voici les détails :
-
-"""
-    for err in errors:
-        body += f"- Ligne {err['line']} : {err['description']}\n  → {err['correction']}\n\n"
-
-    body += f"""
-Code corrigé :
-
-Merci de corriger et resoumettre !
-
-{random.choice(fermetures)}
-L'équipe gr4_project (IA)
-"""
-
-    msg = MIMEMultipart()
-    msg['From'] = EMAIL_SENDER
-    msg['To'] = email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, 587)
-        server.starttls()
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_SENDER, email, msg.as_string())
-        server.quit()
-        print(f"Email envoyé à {email} ({name}).")
-    except smtplib.SMTPException as e:
-        print(f"Erreur envoi à {email} ({name}) : {e}")
-
-
-def send_emails_to_all(all_errors, corrected, files, local_mode):
-    if local_mode:
+def send_email(to_email: str, to_name: str, # pylint: disable=unused-argument
+              all_errors: Dict[str, Dict[str, Any]],
+              email_msg: Dict[str, str]) -> None:
+    """Envoie l'email avec le message genere par Gemini."""
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        print("Config email manquante")
         return
-    for name, email in get_collaborators_emails():
-        send_email(all_errors, corrected, files, name, email)
+
+    body = f"""{email_msg['greeting']}
+
+{email_msg['intro']}
+
+{'='*70}
+ERREURS DETECTEES
+{'='*70}
+
+"""
+
+    for file, data in all_errors.items():
+        body += f"\nFichier: {file}\n{'-'*70}\n"
+
+        if data['linter_errors']:
+            body += "\nERREURS LINTERS:\n"
+            for err in data['linter_errors']:
+                body += f"  - {err}\n"
+
+        if data['ai_errors']:
+            body += "\nANALYSE IA:\n"
+            for err in data['ai_errors']:
+                body += f"  - Ligne {err['line']}: {err['description']}\n"
+                body += f"    Solution: {err['fix']}\n"
+
+        if data['corrected_code']:
+            lang = file.split('.')[-1]
+            code_preview = data['corrected_code'][:800] + "..." \
+                          if len(data['corrected_code']) > 800 \
+                          else data['corrected_code']
+            body += f"\nCODE CORRIGE:\n```{lang}\n{code_preview}\n```\n"
+
+    body += f"\n{'='*70}\n{email_msg['conclusion']}\n"
+
+    msg = MIMEText(body, 'plain', 'utf-8')
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = to_email
+    msg['Subject'] = email_msg['subject']
+
+    try:
+        with smtplib.SMTP(os.getenv('SMTP_SERVER', 'smtp.gmail.com'),
+                         int(os.getenv('SMTP_PORT', '587'))) as server:
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, to_email, msg.as_string())
+        print(f"Email envoye a {to_email}")
+    except Exception as e: # pylint: disable=broad-exception-caught
+        print(f"Erreur email: {e}")
 
 
-def write_pr_comment(all_errors, corrections):
-    body = "# Erreurs détectées par l'IA\n\n"
-    for err in all_errors:
-        body += f"- Ligne {err['line']} : {err['description']}\n"
-    body += "\n**Corrections :**\n"
-    for file, code in corrections.items():
-        body += f"### {file}\n```\n{code}\n```\n"
+def get_user_info() -> Tuple[str, str]:
+    """Recupere nom et email de l'utilisateur Git."""
+    try:
+        name = subprocess.run(['git', 'config', 'user.name'],
+                            capture_output=True, text=True,
+                            check=False).stdout.strip()
+        email = subprocess.run(['git', 'config', 'user.email'],
+                             capture_output=True, text=True,
+                             check=False).stdout.strip()
+        return name or "Dev", email or "dev@example.com"
+    except Exception:  # pylint: disable=broad-exception-caught
+        return "Dev", "dev@example.com"
 
-    os.makedirs('.github/scripts', exist_ok=True)
-    with open('.github/scripts/error_comment.md', 'w', encoding='utf-8') as f:
-        f.write(body)
 
-
-def main():
+def main() -> None:
+    """Fonction principale."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--local', action='store_true')
-    parser.add_argument('files', nargs='*')
     args = parser.parse_args()
 
-    changed = get_changed_files(args.files if args.local else None)
-    if not changed:
-        print("Aucun fichier à vérifier.")
+    print("\n" + "="*70)
+    print("ANALYSEUR CODE IA - Verification Standards")
+    print("="*70 + "\n")
+
+    files = get_files()
+    if not files:
+        print("Aucun fichier a analyser")
         sys.exit(0)
 
-    standards = load_standards()
-    valid = True
-    errors = []
-    corrections = {}
+    print(f"{len(files)} fichier(s):")
+    for file_path in files:
+        print(f"   - {file_path}")
 
-    for file in changed:
-        with open(file, 'r', encoding='utf-8') as f:
-            code = f.read()
+    all_errors: Dict[str, Dict[str, Any]] = {}
+    email_message: Dict[str, str] = {}
 
-        result = analyze_with_gemini(code, standards, file)
-        if not result.get('is_valid', True):
-            valid = False
-            errors.extend(result['errors'])
-            corrections[file] = result['corrected_code']
+    for file_path in files:
+        print(f"\n{'='*70}\n{file_path}\n{'='*70}")
 
-    if not valid:
-        corrected_str = '\n\n---\n\n'.join([f"{f}:\n{c}" for f, c in corrections.items()])
-        send_emails_to_all(errors, corrected_str, changed, args.local)
-        if not args.local:
-            write_pr_comment(errors, corrections)
-        print("Validation échouée.")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file_handle:
+                code = file_handle.read()
+        except Exception as e: # pylint: disable=broad-exception-caught
+            print(f"Erreur lecture: {e}")
+            continue
+
+        # Linters
+        linter_ok, linter_errors = run_linter(file_path)
+        status = "OK" if linter_ok else f"{len(linter_errors)} erreur(s)"
+        print(f"Linters: {status}")
+
+        # IA
+        print("Analyse IA...")
+        ai_result = analyze_with_ai(file_path, code, linter_errors)
+
+        is_valid = ai_result.get('is_valid', True) and linter_ok
+
+        if not is_valid:
+            all_errors[file_path] = {
+                'linter_errors': linter_errors,
+                'ai_errors': ai_result.get('errors', []),
+                'corrected_code': ai_result.get('corrected_code', '')
+            }
+            email_message = ai_result.get('email_message', {})
+            print("REJETE")
+        else:
+            print("VALIDE")
+
+    print("\n" + "="*70)
+
+    if all_errors:
+        print(f"COMMIT REJETE - {len(all_errors)} fichier(s) en erreur\n")
+
+        name, email = get_user_info()
+
+        if not args.local and email_message:
+            send_email(email, name, all_errors, email_message)
+
+        print("Corrige les erreurs et recommite\n")
         sys.exit(1)
-    else:
-        print("Tout est bon !")
-        sys.exit(0)
+
+    print("COMMIT VALIDE - Code conforme\n")
+    sys.exit(0)
 
 
 if __name__ == "__main__":
