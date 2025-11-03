@@ -1,0 +1,45 @@
+name: 🤖 Grok protège mon code
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Grok lit mes fichiers modifiés
+        env:
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+        run: |
+          DIFF=$(git diff --unified=0 HEAD~1 | grep -E '^\+.*' | grep -v '+++' || echo "Aucun changement")
+          echo "$DIFF" > diff.txt
+
+          curl -s https://api.x.ai/v1/chat/completions \
+            -H "Authorization: Bearer $GROK_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "grok-beta",
+              "messages": [
+                {"role":"system","content":"Tu es un expert SQL/PHP. Réponds en 3 lignes max. Si c’est dangereux → dis BLOQUER."},
+                {"role":"user","content":"Vérifie ce code :\n'"$(cat diff.txt)"'"}
+              ]
+            }' | jq -r '.choices[0].message.content' > grok.txt
+
+          cat grok.txt
+
+          grep -iq "BLOQUER" grok.txt && exit 1 || echo "Code OK"
+
+      - name: Commenter la PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const review = require('fs').readFileSync('grok.txt', 'utf8');
+            github.rest.pulls.createReview({
+              ...context.repo,
+              pull_request_number: context.payload.pull_request.number,
+              body: "🤖 **Grok dit :**\n\n" + review,
+              event: "COMMENT"
+            });
